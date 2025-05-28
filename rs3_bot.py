@@ -12,7 +12,7 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_API_URL = "https://api.github.com/repos/kbro1989/Pick_Of_Gods/contents"
 ALT1_ENABLED = True
 UI_LAYOUT = { "clickers": {"x": 400, "y": 600}, "id": {"x": 1000, "y": 300}, "r": {"x": 800, "y": 400} }
-BASE_URL = "http://localhost:8080"
+BASE_URL = "https://rs3-bot.onrender.com"
 
 class RS3Bot:
     def __init__(self):
