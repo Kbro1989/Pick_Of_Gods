@@ -1,5 +1,1 @@
-FROM python:3.13.3-slim
-WORKDIR /opt/render/project/src
-COPY . .
-RUN pip install -r requirements.txt
-CMD ["./run.sh"]
+FROM python:3.13.3-slimWORKDIR /appCOPY . /appRUN apt-get update && apt-get install -y build-essential && rm -rf /var/lib/apt/lists/*RUN pip install --upgrade pipRUN pip install -r requirements.txtCMD ["./run.sh"]

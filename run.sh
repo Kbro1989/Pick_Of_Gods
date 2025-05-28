@@ -1,2 +1,1 @@
-#!/bin/bash
-python rs3_bot.py
+#!/bin/bashpython rs3_bot.py
