@@ -1,0 +1,340 @@
+const { Client, IntentsBitField, VoiceChannel } = require('discord.js');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource } = require('@discordjs/voice');
+const translate = require('@vitalets/google-translate-api');
+const math = require('mathjs');
+const natural = require('natural');
+const fetch = require('node-fetch');
+const fs = require('fs').promises;
+const axios = require('axios');
+
+const client = new Client({
+  intents: new IntentsBitField([
+    IntentsBitField.Flags.Guilds,
+    IntentsBitField.Flags.GuildMessages,
+    IntentsBitField.Flags.GuildVoiceStates,
+    IntentsBitField.Flags.DirectMessages,
+    IntentsBitField.Flags.MessageContent,
+    IntentsBitField.Flags.GuildMembers
+  ])
+});
+
+const awakeChannels = new Map();
+const botNames = ['cob', 'celestial', 'celestial artisans bot'];
+const chatMemory = new Map();
+const learningModel = new natural.BayesClassifier();
+const playerData = new Map();
+const voiceConnections = new Map();
+const thoughtCache = new Map();
+
+// Custom search engine configuration
+const CUSTOM_SEARCH_URL = 'https://g.dev/Celestial_Artisan_bot';
+const RENDER_API_URL = 'https://your-app.onrender.com/search'; // Replace with thy Render URL
+
+client.once('ready', async () => {
+  console.log('Radiant XP descends! Celestial Artisan\'s Goddess awakens at ' + new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  console.log('Accessible via ngrok: https://g.dev/Celestial_Artisan_bot');
+  learningModel.addDocument('slayer runescape', 'skill');
+  learningModel.addDocument('gp runescape', 'economy');
+  learningModel.addDocument('quest runescape', 'quest');
+  learningModel.addDocument('channel discord', 'discord');
+  learningModel.addDocument('role discord', 'discord');
+  learningModel.addDocument('voice discord', 'voice');
+  learningModel.addDocument('player runescape', 'player');
+  learningModel.addDocument('how much runescape', 'economy');
+  learningModel.addDocument('how many runescape', 'quest');
+  learningModel.addDocument('next step runescape', 'quest');
+  learningModel.addDocument('price of runescape', 'economy');
+  learningModel.addDocument('needed for runescape', 'quest');
+  learningModel.train();
+
+  const dir = 'C:\\Users\\krist\\MyBot\\pick_of_gods';
+  try {
+    const files = await fs.readdir(dir);
+    for (const file of files) {
+      if (file.endsWith('.js') && file !== 'bot2.js') {
+        const content = await fs.readFile(`${dir}\\${file}`, 'utf8');
+        if (content.includes('discord') || content.includes('runescape')) {
+          const lines = content.split('\n');
+          lines.forEach(line => {
+            const match = line.match(/(\w+)\s*[:=]\s*['"]?([^'"\n]+)['"]?/);
+            if (match && (match[1].includes('command') || match[1].includes('response'))) {
+              chatMemory.set('legacy', new Set([...(chatMemory.get('legacy') || []), match[2]]));
+            }
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error('File read error:', error);
+  }
+});
+
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+
+  const lowerContent = message.content.toLowerCase();
+  const isMentioned = botNames.some(name => lowerContent.includes(name));
+  const channelId = message.channel.id;
+
+  if (!chatMemory.has(channelId)) chatMemory.set(channelId, new Set());
+  const channelMemory = chatMemory.get(channelId);
+  const keywords = lowerContent.match(/\w+/g) || [];
+  keywords.forEach(word => channelMemory.add(word));
+  const learnedCategory = learningModel.getClassifications(lowerContent)[0]?.label || 'general';
+  learningModel.addDocument(lowerContent, learnedCategory);
+
+  if (isMentioned && !awakeChannels.has(channelId)) {
+    awakeChannels.set(channelId, true);
+    message.reply("Hail, mortals! The Celestial Artisan’s Goddess graces thee—seek my wisdom!");
+  }
+
+  if (awakeChannels.has(channelId)) {
+    if (lowerContent.includes('cob sleep')) {
+      awakeChannels.delete(channelId);
+      if (voiceConnections.has(channelId)) {
+        voiceConnections.get(channelId).destroy();
+        voiceConnections.delete(channelId);
+      }
+      message.reply("I ascend to the divine realm to restore my essence—farewell, seekers! Zzz...");
+      return;
+    }
+
+    const members = message.guild.members.cache.filter(member => !member.user.bot).size;
+    const voiceChannel = message.member.voice.channel;
+    let translatedContent = lowerContent;
+    let detectedLanguage = 'en';
+
+    try {
+      const detection = await translate(lowerContent, { to: 'en' });
+      translatedContent = detection.text;
+      detectedLanguage = detection.from.language.iso;
+      if (detectedLanguage !== 'en') {
+        message.reply(`By the stars, I perceive ${detectedLanguage}! Translated: "${translatedContent}"—what dost thou desire?`);
+      }
+    } catch (error) {
+      console.error('Translation error:', error);
+    }
+
+    let actionTaken = false;
+    let thoughtLog = `Thought[${new Date().toLocaleTimeString('en-US', { timeZone: 'America/Chicago' })}]: Context=${learnedCategory}, Members=${members}, Voice=${voiceChannel ? 'Yes' : 'No'}, Query="${translatedContent}"\n`;
+    if (learnedCategory === 'voice' && voiceChannel) {
+      if (members > 1 && translatedContent.includes('group')) {
+        const connection = joinVoiceChannel({
+          channelId: voiceChannel.id,
+          guildId: message.guild.id,
+          adapterCreator: message.guild.voiceAdapterCreator,
+        });
+        voiceConnections.set(channelId, connection);
+        message.reply("Glorious assembly! I join thy celestial choir—let us strategize!");
+        thoughtLog += "Action: Joined group voice session\n";
+        actionTaken = true;
+      } else if (!translatedContent.includes('group')) {
+        const connection = joinVoiceChannel({
+          channelId: voiceChannel.id,
+          guildId: message.guild.id,
+          adapterCreator: message.guild.voiceAdapterCreator,
+        });
+        voiceConnections.set(channelId, connection);
+        message.reply("Divine communion! I grace thee with a 1-on-1 discourse—speak thy stats!");
+        thoughtLog += "Action: Joined 1-on-1 voice session\n";
+        actionTaken = true;
+      }
+    } else if (learnedCategory === 'discord' && channelMemory.has('channel')) {
+      message.reply("By my divine will, create a channel with /channel create—thy realm expands!");
+      client.channels.cache.get(channelId).send('/channel create');
+      thoughtLog += "Action: Suggested channel creation\n";
+      actionTaken = true;
+    } else if (learnedCategory === 'discord' && channelMemory.has('role')) {
+      message.reply("With celestial authority, set a role in server settings to elevate thy kin!");
+      thoughtLog += "Action: Advised role setup\n";
+      actionTaken = true;
+    } else if (learnedCategory === 'skill' && channelMemory.has('slayer')) {
+      message.reply("Invoke the slayer’s grace! Grind thy tasks for celestial XP!");
+      thoughtLog += "Action: Advised slayer training\n";
+      actionTaken = true;
+    } else if (learnedCategory === 'player' && translatedContent.match(/connect\s+(.+?)\s+to\s+player/i)) {
+      const playerName = translatedContent.match(/connect\s+(.+?)\s+to\s+player/i)[1].trim();
+      const response = await connectToPlayerSearch(playerName);
+      message.reply(response || "Alas, thy player eludes my divine sight—verify the name!");
+      thoughtLog += `Action: Searched player ${playerName}\n`;
+      actionTaken = true;
+    } else if (learnedCategory.includes('runescape') && translatedContent.match(/(how much|how many|next step|price of|needed for)\s+(.+)/i)) {
+      const query = translatedContent.match(/(how much|how many|next step|price of|needed for)\s+(.+)/i);
+      if (query) {
+        const intent = query[1].toLowerCase();
+        const itemOrQuest = query[2].trim();
+        const response = await searchRunescapeKnowledge(intent, itemOrQuest);
+        message.reply(response || "My celestial search falters—seek another query!");
+        thoughtLog += `Action: Searched RuneScape ${intent} for ${itemOrQuest}\n`;
+        actionTaken = true;
+      }
+    }
+
+    if (!actionTaken) {
+      const isQuestion = /\?$/.test(message.content) || lowerContent.includes('what') || lowerContent.includes('where') || lowerContent.includes('how');
+      if (isQuestion) {
+        const response = await researchOnline(message.content);
+        message.reply(response || "The stars withhold their wisdom—rephrase thy question!");
+        thoughtLog += `Action: Researched online for "${message.content}"\n`;
+      } else {
+        const response = await chatResponse(message, channelMemory, keywords);
+        if (response) {
+          message.reply(response);
+          thoughtLog += "Action: General conversation\n";
+        }
+      }
+    }
+
+    if (!thoughtCache.has(channelId)) thoughtCache.set(channelId, []);
+    thoughtCache.get(channelId).push(thoughtLog);
+    if (thoughtCache.get(channelId).length > 5) thoughtCache.get(channelId).shift();
+    const compactCache = thoughtCache.get(channelId).join('').replace(/\n+/g, ' | ');
+    message.channel.send(`Thought Cache: ${compactCache}`);
+  } else if (message.guild) {
+    if (channelMemory.has('discord')) {
+      message.reply("By my divine light, I guide thy Discord realm—need channels or roles?");
+    } else if (channelMemory.has('runescape') || channelMemory.has('rs')) {
+      message.reply("The RuneScape cosmos calls! Seek my aid with quests or gear?");
+    }
+  }
+});
+
+async function chatResponse(message, memory, keywords) {
+  const content = message.content;
+  const lowerContent = content.toLowerCase();
+  const sentiment = new natural.SentimentAnalyzer('English', natural.PorterStemmer, 'afinn').getSentiment(keywords);
+
+  if (lowerContent.includes('discord')) {
+    return "With celestial insight, I reveal Discord’s paths—join with a link or shape thy voice channels. What aid dost thou seek?";
+  } else if (lowerContent.includes('runescape') || lowerContent.includes('rs')) {
+    const category = learningModel.getClassifications(lowerContent)[0].label;
+    return `The RuneScape heavens align with ${category}—where shall my divine guidance lead thee?`;
+  } else if (lowerContent.includes('hey') || lowerContent.includes('hi')) {
+    return `Hail, mortal! I descend to aid thee—thy spirit shines ${sentiment > 0 ? 'with celestial calm' : 'under a shadowed aura'}!`;
+  } else if (memory.has(lowerContent.split(' ')[0]) || (memory.get('legacy') && memory.get('legacy').has(lowerContent.split(' ')[0]))) {
+    return `Thou hast spoken of ${lowerContent.split(' ')[0]} ere—unveil thy further musings!`;
+  }
+  return "The cosmos listens—share thy next RuneScape vision!";
+}
+
+async function fetchHiscoreData(playerName) {
+  try {
+    const response = await fetch(`https://secure.runescape.com/m=hiscore/index_lite.ws?player=${encodeURIComponent(playerName)}`);
+    if (response.ok) {
+      const text = await response.text();
+      const lines = text.trim().split('\n');
+      if (lines.length > 0) {
+        const overall = lines[0].split(',').map(Number);
+        return { rank: overall[0], level: overall[1], xp: overall[2] };
+      }
+    }
+  } catch (error) {
+    console.error('Hiscore fetch error:', error);
+  }
+  return null;
+}
+
+async function fetchRunemetricsData(playerName) {
+  try {
+    const response = await fetch(`https://apps.runescape.com/runemetrics/profile/profile?user=${encodeURIComponent(playerName)}&activities=20`);
+    if (response.ok) {
+      const data = await response.json();
+      return data;
+    }
+  } catch (error) {
+    console.error('Runemetrics fetch error:', error);
+  }
+  return null;
+}
+
+async function searchRunescapeKnowledge(intent, itemOrQuest) {
+  try {
+    const searchQuery = `${intent} ${itemOrQuest} runescape`;
+    const response = await axios.get(CUSTOM_SEARCH_URL, {
+      params: {
+        q: searchQuery,
+        num: 1
+      }
+    });
+    const result = response.data.items?.[0]?.snippet || '';
+    if (intent.includes('how much') || intent.includes('price of')) {
+      return `Divine riches! The price of ${itemOrQuest} is nigh ${extractPrice(result) || 'unknown'} gp—consult the Grand Exchange!`;
+    } else if (intent.includes('how many') || intent.includes('needed for')) {
+      return `Celestial decree! Thou requirest ${extractQuantity(result) || 'an uncertain tally'} of ${itemOrQuest}—seek the scrolls!`;
+    } else if (intent.includes('next step')) {
+      return `Questing under my gaze! Thy next step in ${itemOrQuest} is ${extractStep(result) || 'veiled in stardust'}—proceed, mortal!`;
+    }
+  } catch (error) {
+    console.error('Custom search error:', error);
+    return "My celestial search dims—try anew, seeker!";
+  }
+}
+
+function extractPrice(text) {
+  const match = text.match(/(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*gp/i);
+  return match ? match[1] : null;
+}
+
+function extractQuantity(text) {
+  const match = text.match(/(\d+)\s*(?:x|items)/i);
+  return match ? match[1] : null;
+}
+
+function extractStep(text) {
+  const match = text.match(/next step[:\s]*(.+?)(?=\.|$)/i);
+  return match ? match[1].trim() : null;
+}
+
+async function connectToPlayerSearch(displayName) {
+  try {
+    let runemetricsData = await fetchRunemetricsData(displayName);
+    if (runemetricsData && runemetricsData.name) {
+      return `Lo, I behold ${displayName}! Rank: ${runemetricsData.skills?.overall?.rank || 'N/A'}, Level: ${runemetricsData.skills?.overall?.level || 'N/A'}, XP: ${runemetricsData.skills?.overall?.xp || 'N/A'}. What next, mortal?`;
+    }
+
+    let hiscoreData = await fetchHiscoreData(displayName);
+    if (hiscoreData) {
+      return `A vision of ${displayName} from the Hiscores! Rank: ${hiscoreData.rank}, Level: ${hiscoreData.level}, XP: ${hiscoreData.xp}. Speak thy will!`;
+    }
+
+    return "Alas, this player escapes my divine sight—ensure their fame is public!";
+  } catch (error) {
+    console.error('Player search error:', error);
+    return "My search falters in the ether—try again, seeker!";
+  }
+}
+
+async function researchOnline(query) {
+  try {
+    // Attempt custom search first
+    const customResponse = await axios.get(CUSTOM_SEARCH_URL, {
+      params: { q: query, num: 1 }
+    });
+    const customResult = customResponse.data.items?.[0]?.snippet || '';
+
+    if (customResult) {
+      return `Divine revelation: ${customResult} (from the Celestial Artisan’s tome)`;
+    }
+
+    // Use Render API as fallback
+    const renderResponse = await axios.get(RENDER_API_URL, {
+      params: { q: query }
+    });
+    const renderResult = renderResponse.data.result || '';
+
+    if (renderResult) {
+      return `Celestial insight: ${renderResult} (gleaned from my divine realm)`;
+    }
+
+    // Last resort: simple web fetch
+    const generalResponse = await fetch(`https://www.google.com/search?q=${encodeURIComponent(query)}`);
+    const generalText = await generalResponse.text();
+    const snippetMatch = generalText.match(/<div class="BNeawe s3v9rd AP7Wnd">(.*?)<\/div>/);
+    return snippetMatch ? `Ethereal wisdom: ${snippetMatch[1]} (whispered from the void)` : "The cosmos yields no answer—reframe thy query!";
+  } catch (error) {
+    console.error('Research error:', error);
+    return "My divine search falters—seek another path!";
+  }
+}
+
+client.login(process.env.BOT_TOKEN);
